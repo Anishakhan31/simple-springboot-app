@@ -1,0 +1,66 @@
+name: Deploy Serverless Backend
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Build & Upload JAR to S3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build project with Maven
+        run: mvn clean package
+
+      - name: Upload JAR to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: "us-east-1"
+          S3_BUCKET: "test-93481098"
+          JAR_NAME: "*.jar"
+        run: |
+          JAR_PATH=$(find target -name "*.jar" | head -n 1)
+          aws s3 cp $JAR_PATH s3://$S3_BUCKET/$JAR_NAME
+
+  deploy:
+    name: Deploy Lambda & API Gateway
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update Lambda Function
+        env:
+          S3_BUCKET: "test-93481098"
+          JAR_NAME: "*.jar"
+          LAMBDA_FUNCTION_NAME: "test-function"
+        run: |
+          aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --s3-bucket $S3_BUCKET --s3-key $JAR_NAME
+
+      - name: Deploy API Gateway
+        env:
+          API_GATEWAY_ID: "ad-tfbjcjytg2"
+        run: |
+          aws apigateway create-deployment --rest-api-id $API_GATEWAY_ID --stage-name development
+
+      - name: Get API Gateway Invoke URL
+        env:
+          API_GATEWAY_ID: "ad-tfbjcjytg2"
+        run: |
+          echo "Invoke URL: https://${API_GATEWAY_ID}.execute-api.us-east-1.amazonaws.com/development"
